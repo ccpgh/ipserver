@@ -1,0 +1,8 @@
+1675769816058	Rename local variable 'builder'
+1675794207517	Rename method 'callServer'
+1675795698521	Delete element
+1676142481601	Rename method 'decryptBase64UsingPrivateKey'
+1676145986433	Rename method 'deformatData'
+1676146094831	Rename method 'encodeAndFormatData'
+1676146117667	Rename method 'base64DecodeAndUnformatData'
+1676149965272	Rename method 'getKey'

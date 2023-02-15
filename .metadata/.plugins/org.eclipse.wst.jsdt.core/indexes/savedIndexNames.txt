@@ -1,0 +1,7 @@
+INDEX VERSION 1.4+/home/cc/Desktop/dev/eclipse-workspaces/java/8/ip/.metadata/.plugins/org.eclipse.wst.jsdt.core/indexes
+1774712710.index
+1955203064.index
+2623317481.index
+731033396.index
+225469150.index
+2381848914.index

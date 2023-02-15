@@ -1,0 +1,493 @@
+package cc.tools.ip.client;
+
+import java.io.*;
+import java.lang.reflect.*;
+import java.net.*;
+import java.net.http.*;
+import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.security.spec.*;
+import java.time.*;
+import java.util.*;
+
+import javax.crypto.Cipher;
+
+/**
+ * This class implements the http client program. This client can be used to
+ * send messages to the associated IpServer program.
+ * 
+ * @author ccpgh
+ * @version %I%, %G%
+ * @since 0.1
+ */
+public final class IpClient {
+
+	public static void main(String[] args) {
+		System.out.println(new Date() + ": running");
+
+		if (IpConfig.getIpConfig().checkIsHelp(args)) {
+			IpConfig.getIpConfig().doHelp();
+			return;
+		}
+
+		if (!IpConfig.getIpConfig().load(args) || !IpConfig.getIpConfig().getIsValid()) {
+
+			System.err.println("error: invalid parameters " + IpConfig.getIpConfig().getErrors().size() + " errors");
+			for (String error : IpConfig.getIpConfig().getErrors()) {
+				System.err.println("error: " + error);
+			}
+			return;
+		}
+
+		IpConfig.getIpConfig().dump();
+
+		IpClient ipClient = new IpClient();
+
+		if (!ipClient.isValid()) {
+			System.err.println("error: client failed to initialise");
+			return;
+		}
+
+		if (!ipClient.updateServer()) {
+			System.err.println("error: server call failed");
+			return;
+		}
+
+		System.out.println("fini.");
+	}
+
+	/**
+	 * Contains http client for calls to server
+	 */
+	private static final HttpClient httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2)
+			.connectTimeout(Duration.ofSeconds(10)).build();
+
+	/**
+	 * Constructor
+	 */
+	public IpClient() {
+
+		try {
+			_keyFactory = KeyFactory.getInstance("RSA");
+		} catch (NoSuchAlgorithmException e) {
+			System.err.println("exception: getting RSA KeyFactory " + e.getClass().getName() + ": " + e.getMessage());
+			if (IpConfig.getIpConfig().getDebug()) {
+				e.printStackTrace();
+			}
+		}
+		
+		if (_keyFactory == null) {
+			System.err.println("error: KeyFactory init failed");
+			return;
+		}
+
+		File directory = new File(IpConfig.getIpConfig().getCerts());
+
+		if (!directory.exists() || !directory.canRead()) {
+			System.err.println("error: certs dir '" + IpConfig.getIpConfig().getCerts() + "' not accessible");
+			return;
+		}
+
+		if (!setPublicKey(IpConfig.getIpConfig().getCerts()) | !setPrivateKey(IpConfig.getIpConfig().getCerts())) {
+			return;
+		}
+
+		_isValid = true;
+	}
+
+	/**
+	 * Returns boolean indicating whether IpConfig object is in a valid state This
+	 * should only be called after init has been executed
+	 * 
+	 * @return boolean indicating object status - whether valid or not
+	 */
+	public boolean isValid() {
+		return _isValid;
+	}
+
+	/**
+	 * Method calls server with a random salt value and a timestamp. It receives in
+	 * return the salt and timestamp values which have been decrypted and the sent
+	 * back encrypted by the server using the clients public key. In addition the
+	 * client's public ip address (as viewed by the server) is returned to the
+	 * client, likewise in encrypted form. The sent and received salt and timestamp
+	 * values are checked to ensure that they are the same. Equality here proves the
+	 * identity of the server.
+	 * 
+	 * @param ipOut the returned public ip address from the server is returned to
+	 *              method caller by writing it to this parameter.
+	 * @return boolean indicating whether the calls and protocol have been performed
+	 *         correctly and whether the results returned by the server pass content
+	 *         and equality tests.
+	 */
+	private boolean getPublicIpFromServer(StringBuilder ipOut) {
+
+		StringBuilder response = new StringBuilder();
+		String salt = Double.toString(Math.random());
+		String timestamp = Long.toString(Instant.now().toEpochMilli());
+
+		Map<String, String> data = new HashMap<String, String>();
+		data.put("A", encryptBase64WithPublicKey(salt));
+		data.put("B", encryptBase64WithPublicKey(timestamp));
+
+		try {
+			int result = doPut(IpConfig.getIpConfig().getGetUrl(), response, data);
+
+			if (result != 200) {
+				System.err.println("error: call to doPut failed - code " + Integer.toString(result));
+				return false;
+			}
+
+			data = base64DecodeAndDeformatData(response.toString());
+
+			String ipResponse = decryptBase64WithPrivateKey(data.get("C"));
+
+			boolean result = true;
+
+			if (salt.compareTo(decryptBase64WithPrivateKey(data.get("A"))) != 0) {
+				System.err.println("error: in data 'A' from server mismatch from out data");
+				result = false;
+			}
+
+			if (timestamp.compareTo(decryptBase64WithPrivateKey(data.get("B"))) != 0) {
+				System.err.println("error: in data 'B' from server mismatch from out data");
+				result = false;
+			}
+
+			if (!IpCommon.isValidInet4AddressFormat(ipResponse)) {
+				System.err.println("error: invalid Ip Address in data 'C' sent from server");
+				result = false;
+			}
+
+			if (!result) {
+				return false;
+			}
+
+			if (!ipOut.isEmpty()) {
+				System.err.println("error: out parameter is not empty - found '" + ipOut + "'");
+				return false;
+			}
+
+			ipOut.append(ipResponse);
+
+		} catch (Exception e) {
+			System.err.println("exception: during getCurrentIp " + e.getClass().getName() + ": " + e.getMessage());
+			if (IpConfig.getIpConfig().getDebug()) {
+				e.printStackTrace();
+			}
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Method calls the server to request that the server updates ip permissions.
+	 * The client sends a random salt, a timestamp and the ip address to be added to
+	 * the server permissions. The return code from the server is checked to ensure
+	 * that it is 200. If anything other than 200 is returned by the server this
+	 * function returns false other true.
+	 * 
+	 * @param ip the ip address to be sent to the server for permission changes
+	 * @return boolean indicating whether the process worked or not
+	 */
+	private boolean setPublicIpOnFromServer(String ip) {
+		StringBuilder response = new StringBuilder();
+
+		Map<String, String> data = new HashMap<String, String>();
+
+		data.put("A", encryptBase64WithPublicKey(Double.toString(Math.random())));
+		data.put("B", encryptBase64WithPublicKey(Long.toString(Instant.now().toEpochMilli())));
+		data.put("C", encryptBase64WithPublicKey(ip));
+
+		try {
+			int result = doPut(IpConfig.getIpConfig().getGetUrl(), response, data);
+
+			if (result != 200) {
+				System.err.println("error: call to doPut failed - code " + Integer.toString(result));
+				return false;
+			}
+		} catch (Exception e) {
+			System.err.println("exception: during getCurrentIp " + e.getClass().getName() + ": " + e.getMessage());
+			if (IpConfig.getIpConfig().getDebug()) {
+				e.printStackTrace();
+			}
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Contacts server to obtain and then request that the server adds client
+	 * external to the servers ufw permissions processing pipeline. This is done by
+	 * virtue of two separate calls. The first is to obtain our public ip and the
+	 * second is the request for processing containing that ip. Data requests are
+	 * sent encrypted. First using base64 transformation for ease of handling and
+	 * then using asynchronous keys for extra security. Depending on value in
+	 * -protocol argument data can also be sent via https if the server is so
+	 * enabled.
+	 * 
+	 * @return boolean value indicating status of request
+	 */
+	public boolean updateServer() {
+
+		StringBuilder ip = new StringBuilder();
+
+		if (!getPublicIpFromServer(ip)) {
+			System.err.println("error: getPublicIpFromServer failed");
+			return false;
+		}
+
+		if (!setPublicIpOnFromServer(ip.toString())) {
+			System.err.println("error: setPublicOnFromServer failed");
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Loads key from file based on parameter values
+	 * 
+	 * @param uri              location of file which contains key
+	 * @param keySpecClass     class indicating the type of the key that should be
+	 *                         created
+	 * @param pattern          string value in header and footer of key file that
+	 *                         need to be removed
+	 * @param generateFunction function name for generation of key object
+	 * @return created Key value
+	 */
+	private Key loadKey(String uri, Class<?> keySpecClass, String pattern, String generateFunction) {
+		StringBuilder resource = new StringBuilder();
+
+		if (!IpCommon.loadFile(uri, resource, IpConfig.getIpConfig().getDebug())) {
+			System.err.println("error: unable to loadFile " + uri);
+			return null;
+		}
+
+		byte[] decoded = Base64.getDecoder()
+				.decode(resource.toString().replaceAll("\\n", "").replaceAll("-----BEGIN " + pattern + " KEY-----", "")
+						.replaceAll("-----END " + pattern + " KEY-----", "").trim());
+
+		try {
+			Constructor<?> constructor = keySpecClass.getDeclaredConstructor(decoded.getClass());
+			Object object = constructor.newInstance(new Object[] { decoded });
+			if (object instanceof KeySpec) {
+				KeySpec keySpec = (KeySpec) object;
+				Method method = _keyFactory.getClass().getDeclaredMethod(generateFunction, KeySpec.class);
+				object = method.invoke(_keyFactory, keySpec);
+				if (object instanceof Key) {
+					return (Key) object;
+				}
+			}
+		} catch (Exception e) {
+			System.err.println("exception: " + e.getClass().getName() + " - " + e.getMessage());
+			if (IpConfig.getIpConfig().getDebug()) {
+				e.printStackTrace();
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Performs http get call to server Returns status of a http get call and
+	 * returns server response data in response parameter
+	 * 
+	 * @param url      server url to call
+	 * @param response buffer to return server response in
+	 * @param data     name/value pairs of data that should be sent to server
+	 * @throws Exception based on errors encountered formatting/encoding data and
+	 *                   communicating with server
+	 * @return String containing base64 encoded text result of encryption
+	 */
+	@SuppressWarnings("unused")
+	private static int doGet(String url, StringBuilder response) throws Exception {
+		StringBuilder result = new StringBuilder();
+		HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+		conn.setRequestMethod("GET");
+		int code = conn.getResponseCode();
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+			for (String line; (line = reader.readLine()) != null;) {
+				result.append(line);
+			}
+		}
+		response.append(result.toString());
+		return code;
+	}
+
+	/**
+	 * Performs http put call to server Returns status of a http put call and
+	 * returns server response data in response parameter
+	 * 
+	 * @param url      server url to call
+	 * @param response buffer to return server response in
+	 * @param data     name/value pairs of data that should be sent to server
+	 * @throws Exception based on errors encountered formatting/encoding data and
+	 *                   communicating with server
+	 * @return String containing base64 encoded text result of encryption
+	 */
+	private static int doPut(String url, StringBuilder response, Map<String, String> data) throws Exception {
+		HttpRequest request = HttpRequest.newBuilder().POST(base64EncodeAndFormatData(data)).uri(URI.create(url))
+				.setHeader("User-Agent", "IpClient command line program")
+				.header("Content-Type", "application/x-www-form-urlencoded").build();
+
+		HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+		response.append(httpResponse.body());
+		return httpResponse.statusCode();
+	}
+
+	/**
+	 * Performs data encryption Returns base64 encoded cypher text of string
+	 * contained in PlainText parameter using the target server programs PublicKey
+	 * 
+	 * @param plainText plain text to be encrypted
+	 * @return String containing base64 encoded text result of encryption
+	 */
+	private String encryptBase64WithPublicKey(String plainText) {
+		if (plainText == null) {
+			System.err.println("error: null data in encryptBase64WithPublicKey");
+			return null;
+		}
+		try {
+			Cipher cipher = Cipher.getInstance("RSA");
+			cipher.init(Cipher.ENCRYPT_MODE, _publicKey);
+			return Base64.getEncoder().encodeToString(cipher.doFinal(plainText.getBytes()));
+		} catch (Exception e) {
+			System.err.println("exception: " + e.getClass().getName() + " - " + e.getMessage());
+			if (IpConfig.getIpConfig().getDebug()) {
+				e.printStackTrace();
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Performs data decryption Returns plain text result of decrypting parameter
+	 * base64EncodedEncryptedBytes using the client programs PrivateKey
+	 * 
+	 * @param base64EncodedEncryptedBytes encrypted base64 text to be decrypted
+	 * @return String containing plain text result of decryption
+	 */
+	private String decryptBase64WithPrivateKey(String base64EncodedEncryptedBytes) {
+		if (base64EncodedEncryptedBytes == null) {
+			System.err.println("error: null data in decryptBase64WithPrivateKey");
+			return null;
+		}
+
+		try {
+			final Cipher cipher = Cipher.getInstance("RSA");
+			cipher.init(Cipher.DECRYPT_MODE, _privateKey);
+			return new String(cipher.doFinal(Base64.getDecoder().decode(base64EncodedEncryptedBytes)));
+		} catch (Exception e) {
+			System.err.println("exception: " + e.getClass().getName() + " - " + e.getMessage());
+			if (IpConfig.getIpConfig().getDebug()) {
+				e.printStackTrace();
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Sets object public key value
+	 * 
+	 * @param path value containing file system path to directory containing public
+	 *             key certificate file
+	 * @return boolean indicating success or failure
+	 */
+	private boolean setPublicKey(String path) {
+		Key publicKey = loadKey(path + File.separatorChar + "public.key", X509EncodedKeySpec.class, "PUBLIC",
+				"generatePublic");
+
+		if (publicKey instanceof PublicKey) {
+			_publicKey = (PublicKey) publicKey;
+			return true;
+		}
+
+		System.err.println("error: could not load public key");
+		return false;
+	}
+
+	/**
+	 * Sets object private key value
+	 * 
+	 * @param path value containing file system path to directory containing private
+	 *             key certificate file
+	 * @return boolean indicating success or failure.
+	 */
+	private boolean setPrivateKey(String path) {
+		Key privateKey = loadKey(path + File.separatorChar + "private.crt", PKCS8EncodedKeySpec.class, "PRIVATE",
+				"generatePrivate");
+
+		if (privateKey instanceof PrivateKey) {
+			_privateKey = (PrivateKey) privateKey;
+			return true;
+		}
+
+		System.err.println("error: could not load private key");
+		return false;
+	}
+
+	/**
+	 * Base64 encodes data Returns Base64 encoded name value pairs in Map passed as
+	 * parameter data
+	 * 
+	 * @param data name value pairs in Map to be encoded by function
+	 * @return base64 encoded string
+	 */
+	private static HttpRequest.BodyPublisher base64EncodeAndFormatData(Map<String, String> data) {
+		StringBuilder buffer = new StringBuilder();
+		for (Map.Entry<String, String> entry : data.entrySet()) {
+			buffer.append(!buffer.isEmpty() ? "&" : "");
+			buffer.append(URLEncoder.encode(entry.getKey().toString(), StandardCharsets.UTF_8));
+			buffer.append("=");
+			buffer.append(URLEncoder.encode(entry.getValue().toString(), StandardCharsets.UTF_8));
+		}
+		return HttpRequest.BodyPublishers.ofString(buffer.toString());
+	}
+
+	/**
+	 * Base64 decodes data Returns name value pairs in Map obtained by decoded
+	 * parameter encoded
+	 * 
+	 * @param encoded base64 encoded name/value pairs
+	 * @return Map containing decoded name/value pairs
+	 */
+	private static Map<String, String> base64DecodeAndDeformatData(String encoded) {
+		Map<String, String> data = new HashMap<String, String>();
+		String[] assignments = encoded.split("&");
+		for (String assignment : assignments) {
+			String[] tuple = assignment.split("=");
+			if (tuple.length == 1) {
+				data.put(tuple[0], "");
+			} else if (tuple.length == 2) {
+				data.put(tuple[0], URLDecoder.decode(tuple[1], StandardCharsets.UTF_8));
+			} else {
+				System.out.println("skipped '" + assignment + "'");
+			}
+		}
+		return data;
+	}
+
+	/**
+	 * Boolean indicating whether this IpClient object is in a valid state.
+	 */
+	private boolean _isValid = false;
+
+	/**
+	 * KeyFactory used to generate private and public keys
+	 */
+	private KeyFactory _keyFactory = null;
+
+	/**
+	 * Generated private key is stored here
+	 */
+	private PrivateKey _privateKey = null;
+
+	/**
+	 * Generated public key is stored here
+	 */
+	private PublicKey _publicKey = null;
+}

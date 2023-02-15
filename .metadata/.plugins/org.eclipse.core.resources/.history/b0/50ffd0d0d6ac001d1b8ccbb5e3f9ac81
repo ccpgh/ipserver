@@ -1,0 +1,666 @@
+package cc.tools.ip.server;
+
+import java.io.*;
+import java.security.*;
+import java.security.spec.*;
+import java.time.Instant;
+import java.util.*;
+import java.net.*;
+import java.util.logging.*;
+import java.util.regex.Pattern;
+import java.lang.reflect.*;
+import java.nio.charset.StandardCharsets;
+
+import javax.servlet.*;
+import javax.servlet.http.*;
+
+import javax.crypto.Cipher;
+
+public final class IpServer extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+
+	/**
+	 * Constructor
+	 */
+	public IpServer() {
+		super();
+	}
+
+	/**
+	 * Method loads the client public key from servlet resources
+	 * 
+	 * @return boolean indicating whether the load succeeded
+	 */
+	private boolean setPublicKey() {
+		_publicKeyUri = getServletContext().getInitParameter("client-public-key");
+		if (_publicKeyUri == null) {
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "could not load public key Uri from context");
+			return false;
+		}
+
+		Key publicKey = getKeyFromURI(_publicKeyUri, X509EncodedKeySpec.class, "PUBLIC", "generatePublic");
+
+		if (publicKey instanceof PublicKey) {
+			_publicKey = (PublicKey) publicKey;
+			return true;
+		}
+
+		Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "could not load public key");
+		return false;
+	}
+
+	/**
+	 * Method loads the client private key from servlet resources
+	 * 
+	 * @return boolean indicating whether the load succeeded
+	 */
+	private boolean setPrivateKey() {
+		_privateKeyUri = getServletContext().getInitParameter("server-private-key");
+		if (_privateKeyUri == null) {
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "could not load private key Uri from context");
+			return false;
+		}
+
+		Key privateKey = getKeyFromURI(_privateKeyUri, PKCS8EncodedKeySpec.class, "PRIVATE", "generatePrivate");
+
+		if (privateKey instanceof PrivateKey) {
+			_privateKey = (PrivateKey) privateKey;
+			return true;
+		}
+
+		Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "could not load private key");
+		return false;
+	}
+
+	/**
+	 * Method loads the client public key from servlet resources
+	 * 
+	 * @return boolean indicating whether the load succeeded
+	 * @throws ServletException
+	 */
+	public void init(ServletConfig config) throws ServletException {
+		super.init(config);
+
+		try {
+			_keyFactory = KeyFactory.getInstance("RSA");
+		} catch (NoSuchAlgorithmException e) {
+			logException(e);
+			return;
+		}
+		
+		if (_keyFactory == null) {
+			System.err.println("error: KeyFactory init failed");
+			return;
+		}
+
+		if (_keyFactory == null) {
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "key factory is null");
+			return;
+		}
+
+		try {
+			if (!setPublicKey() || !setPrivateKey()) {
+				Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "could not init servlet");
+				return;
+			}
+		} catch (Exception e) {
+			logException(e);
+			return;
+		}
+
+		_isValid = true;
+	}
+
+	/**
+	 * Performs data encryption Returns base64 encoded cypher text of string
+	 * contained in PlainText parameter using the target server programs PublicKey
+	 * 
+	 * @param plainText plain text to be encrypted
+	 * @return String containing base64 encoded text result of encryption
+	 */
+	private String encryptBase64WithPublicKey(String plainText) {
+		if (plainText == null) {
+			System.err.println("error: null data in encryptBase64WithPublicKey");
+			return null;
+		}
+
+		try {
+			Cipher cipher = Cipher.getInstance("RSA");
+			cipher.init(Cipher.ENCRYPT_MODE, _publicKey);
+			return Base64.getEncoder().encodeToString(cipher.doFinal(plainText.getBytes()));
+		} catch (Exception e) {
+			logException(e);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Performs data decryption Returns plain text result of decrypting parameter
+	 * base64EncodedEncryptedBytes using the client programs PrivateKey
+	 * 
+	 * @param base64EncodedEncryptedBytes encrypted base64 text to be decrypted
+	 * @return String containing plain text result of decryption
+	 */
+	private String decryptBase64WithPrivateKey(String base64EncodedEncryptedBytes) {
+		if (base64EncodedEncryptedBytes == null) {
+			System.err.println("error: null data in decryptBase64WithPrivateKey");
+			return null;
+		}
+
+		try {
+			final Cipher cipher = Cipher.getInstance("RSA");
+			cipher.init(Cipher.DECRYPT_MODE, _privateKey);
+			return new String(cipher.doFinal(Base64.getDecoder().decode(base64EncodedEncryptedBytes)));
+		} catch (Exception e) {
+			logException(e);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Override of 'service' servlet life cycle method Method returns code 500 if
+	 * the init method was unable to fully init the servlet The solution is to
+	 * reload the servlet or to restart the hosting server
+	 * 
+	 * @param request  the http call request object
+	 * @param response the http call response object
+	 * @throws IOException
+	 * @throws ServletException
+	 */
+	protected void service(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		if (!_isValid) {
+			response.setStatus(500);
+			response.getWriter().append("servlet invalid");
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "servlet invalid");
+			return;
+		}
+		super.service(request, response);
+	}
+
+	/**
+	 * Method returns the stack trace in the throwable object as a String object
+	 * 
+	 * @param throwable Throwable object containing stack trace to be turned into
+	 *                  String
+	 * @return String containing stack trace of throwable parameter
+	 */
+	private static String getStackTrace(Throwable throwable) {
+		final StringWriter stringWriter = new StringWriter();
+		final PrintWriter printWriter = new PrintWriter(stringWriter, true);
+		throwable.printStackTrace(printWriter);
+		return stringWriter.getBuffer().toString();
+	}
+
+	/**
+	 * Method to log exception data to server log
+	 * 
+	 * @param e exception object whose data is to be logged
+	 */
+	private static void logException(Exception e) {
+		Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+				"exception: " + e.getClass().getName() + " - " + e.getMessage());
+		Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, getStackTrace(e));
+	}
+
+	/**
+	 * Override of 'doGet' servlet life cycle method Method returns stored ip
+	 * address from post clients to endpoint 'query' clients located on the same
+	 * host
+	 * 
+	 * @param request  the http call request object
+	 * @param response the http call response object
+	 * @throws IOException
+	 * @throws ServletException
+	 */
+	protected void doGet(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "doGet called");
+		response.setStatus(200);
+		if (isQueryRequest(request.getRequestURI())) {
+			StringBuilder buffer = new StringBuilder();
+			if (getAllowedClients(request.getRemoteAddr(), buffer)) {
+				response.getWriter().append(buffer);				
+			}
+			Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "doGet ok sent '" + buffer.toString() + "'");
+		} else {
+			Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "doGet ok sent ''");
+		}
+	}
+
+	/**
+	 * Method returns a list of comma delimited client ip addresses 
+	 * if the client in parameter ip is allowed, otherwise it 
+	 * returns an empty String.
+	 * A client is allowed if it itself is in the ipHistory or if it on localhost.
+	 * Entries in ipHistory which are more than 1 hour old are removed
+	 * @param ip ip address of client
+	 * @param StringBuffer containing comma delimited list of clients
+	 * @return boolean indicating whether ip-client is allowed to view saved clients
+	 * and returns results in the method buffer parameter
+	 */
+	boolean getAllowedClients(String clientIp, StringBuilder buffer) {
+		boolean isAllowedLocalhost = CONST_LOCALHOST_IP_STRING.compareTo(clientIp) == 0;
+		boolean isAllowedClientIp = isClientIp(clientIp);
+
+		if (!isAllowedLocalhost && !isAllowedClientIp) {
+			return false;
+		}
+		
+		Set<String> clientIps = getClientIps();
+		
+		if (isAllowedClientIp && !clientIps.contains(clientIp)) {
+			clientIps.add(clientIp); // correct race condition removal 
+		}
+		
+		StringBuilder results = new StringBuilder();
+		for (String result : clientIps) {
+			if (!results.isEmpty()) {
+				results.append('.');
+			}
+			results.append(ip);
+		}
+		
+		buffer.append(results);
+		return true;
+	}
+
+	/**
+	 * Method returns a list of current clientIps
+	 * @return Set<String> containing all keys from client ip list clientIps
+	 */
+	Set<String> getClientIps() {
+    	long now = Instant.now().toEpochMilli();
+    	Set<String> result = new HashSet<String>();
+
+    	synchronized(_clientIps) {
+        	_clientIps.entrySet()
+             .removeIf(
+                 entry -> (entry.getValue() < now));
+        	result.addAll(_clientIps.keySet());
+        	return result;
+        }
+	}
+	
+	/**
+	 * Method returns true of parameter clientIp is in clientIps list
+	 * @param clientIp contains client ip address to be be checked against client ip address list 
+	 * @return boolean if parameter clientIp is found in object variable clientIps
+	 */
+	boolean isClientIp(String clientIp) {
+    	long now = Instant.now().toEpochMilli();
+
+    	synchronized(_clientIps) {
+        	_clientIps.entrySet()
+             .removeIf(
+                 entry -> (entry.getValue() < now));
+        	return _clientIps.containsKey(clientIp);
+        }
+	}
+	
+	/**
+	 * Method adds the ip in parameter clientIp to the object clientIps Map plus timestamp
+	 * @param clientIp contains client ip address to be added to client ip address list 
+	 */
+	void addClientIp(String clientIp) {
+    	long now = Instant.now().toEpochMilli();
+
+    	synchronized(_clientIps) {
+        	_clientIps.put(clientIp, now + IpServer.CONST_MILLISECONDS_IN_ONEDAY);
+        	_clientIps.entrySet()
+             .removeIf(
+                 entry -> (entry.getValue() < now));
+        }
+	}
+	
+	/**
+	 * Method returns bool indicating whether paramater requestURI for the 'query'
+	 * endpoint
+	 * 
+	 * @param requestURI contains requested URI return boolean is parameter
+	 *                   requestURI points to 'query' endpoint
+	 **/
+	private boolean isQueryRequest(String requestURI) {
+		return "/tomcat/server/ip/query".compareToIgnoreCase(requestURI) == 0;
+	}
+
+	/**
+	 * Method returns bool indicating whether paramater requestURI for the 'get'
+	 * endpoint
+	 * 
+	 * @param requestURI contains requested URI return boolean is parameter
+	 *                   requestURI points to 'get' endpoint
+	 **/
+	private boolean isGetRequest(String requestURI) {
+		return "/tomcat/server/ip/get".compareToIgnoreCase(requestURI) == 0;
+	}
+
+	/**
+	 * Method returns bool indicating whether paramater requestURI for the 'set'
+	 * endpoint
+	 * 
+	 * @param requestURI contains requested URI return boolean is parameter
+	 *                   requestURI points to 'set' endpoint
+	 **/
+	private boolean isSetRequest(String requestURI) {
+		return "/tomcat/server/ip/set".compareToIgnoreCase(requestURI) == 0;
+	}
+
+	/**
+	 * Override of 'doPost' servlet life cycle method. Method calls other methods to
+	 * service get, set and query endpoints, else returns nothing
+	 * 
+	 * @param request  the http call request object
+	 * @param response the http call response object
+	 * @throws IOException
+	 * @throws ServletException
+	 */
+	protected void doPost(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "doPost called");
+		String requestURI = request.getRequestURI();
+
+		if (isGetRequest(requestURI)) {
+			serviceGetEndpoint(request, response);
+		} else if (isSetRequest(requestURI)) {
+			serviceSetEndpoint(request, response);
+		} else if (isQueryRequest(requestURI)) {
+			serviceQueryEndpoint(request, response);
+		} else {
+			response.setStatus(200);
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "ignoring context " + requestURI);
+		}
+	}
+
+	/**
+	 * Method implements processing code for the server's query endpoint Method
+	 * sends ip data (as set by clients) to the caller iff the caller is on the
+	 * local host. No encryption is used.
+	 * 
+	 * @param request  the http call request object
+	 * @param response the http call response object
+	 * @throws IOException
+	 * @throws ServletException
+	 */
+	private void serviceQueryEndpoint(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "serviceQueryEndpoint called");
+		response.setStatus(200);
+		boolean validClient = CONST_LOCALHOST_IP_STRING.compareTo(request.getRemoteAddr()) == 0;
+		String ip = validClient ? _ip : "";
+		response.getWriter().append(ip);
+		Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "serviceQueryEndpoint ok");
+	}
+
+	/**
+	 * Method implements processing code for the server's set endpoint
+	 * 
+	 * @param request  the http call request object
+	 * @param response the http call response object
+	 * @throws IOException
+	 * @throws ServletException
+	 */
+	private void serviceSetEndpoint(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "serviceSetEndpoint called");
+
+		if (request.getParameterMap().size() != 3) {
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+					"NOT ok - invalid parameters - got " + request.getParameterMap().size());
+			response.setStatus(400);
+			return;
+		}
+
+		String salt = decryptBase64WithPrivateKey(request.getParameter("A"));
+		String timestamp = decryptBase64WithPrivateKey(request.getParameter("B"));
+		String clientIp = decryptBase64WithPrivateKey(request.getParameter("C"));
+
+		if (salt == null || salt.isEmpty() || timestamp == null || timestamp.isEmpty() || clientIp == null || clientIp.isEmpty()) {
+			response.setStatus(400);
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+					"NOT ok - parameters could not be extracted from request");
+			return;
+		}
+
+		if (!isValidInet4AddressFormat(clientIp)) {
+			response.setStatus(400);
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+					"NOT ok - valid clientIp could not be extracted - found '" + clientIp + "'");
+			return;
+		}
+
+		Map<Object, Object> data = new HashMap<Object, Object>();
+		data.put("A", encryptBase64WithPublicKey(salt));
+		data.put("B", encryptBase64WithPublicKey(timestamp));
+		data.put("C", encryptBase64WithPublicKey(clientIp));
+
+		String formattedData = base64EncodeAndFormatData(data);
+		if (formattedData != null && !formattedData.isEmpty()) {
+			addClientIp(clientIp);
+			response.setStatus(200);
+			response.getWriter().append(formattedData);
+			Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "ok");
+			return;
+		}
+
+		response.setStatus(400);
+		Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "NOT ok");
+	}
+
+	/**
+	 * Method implements processing code for the server's get endpoint
+	 * 
+	 * @param request  the http call request object
+	 * @param response the http call response object
+	 * @throws IOException
+	 * @throws ServletException
+	 */
+	private void serviceGetEndpoint(HttpServletRequest request, HttpServletResponse response)
+			throws ServletException, IOException {
+		Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "serviceGetEndpoint called");
+
+		if (request.getParameterMap().size() != 2) {
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+					"NOT ok - invalid parameters - got " + request.getParameterMap().size());
+			response.setStatus(400);
+			return;
+		}
+
+		String salt = decryptBase64WithPrivateKey(request.getParameter("A"));
+		String timestamp = decryptBase64WithPrivateKey(request.getParameter("B"));
+
+		if (salt == null || salt.isEmpty() || timestamp == null || timestamp.isEmpty()) {
+			response.setStatus(400);
+			Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+					"NOT ok - parameters could not be extracted from request");
+			return;
+		}
+
+		Map<Object, Object> data = new HashMap<Object, Object>();
+		data.put("A", encryptBase64WithPublicKey(salt));
+		data.put("B", encryptBase64WithPublicKey(timestamp));
+		data.put("C", encryptBase64WithPublicKey(request.getRemoteAddr()));
+
+		String formattedData = base64EncodeAndFormatData(data);
+		if (formattedData != null && !formattedData.isEmpty()) {
+			response.setStatus(200);
+			response.getWriter().append(formattedData);
+			Logger.getLogger(IpServer.class.getName()).log(Level.INFO, "ok");
+			return;
+		}
+
+		response.setStatus(400);
+		Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE, "NOT ok");
+	}
+
+	/**
+	 * Method loads a Private or Public base64 encoded key from a servlet Uri
+	 * resource and uses this to create a security Key based on parameters keyClass
+	 * and generateFunction
+	 * 
+	 * @param uri                target resource containing base64 encoded key data
+	 * @param keyClass           class that should be used in creating key object
+	 * @param pattern            literal string pattern that should be used to
+	 *                           remove key file header/trailer line
+	 * @param generateMethodName name of KeyFactory method to be called to create
+	 *                           the final Key object
+	 * @return Key created by function. If function fails a null will be returned.
+	 **/
+	Key getKeyFromURI(String uri, Class<?> keyClass, String pattern, String generateMethodName) {
+		StringBuilder buffer = new StringBuilder();
+
+		if (!loadURI(uri, buffer)) {
+			System.err.println("error: unable to loadFile " + uri);
+			return null;
+		}
+
+		byte[] decoded = Base64.getDecoder()
+				.decode(buffer.toString().replaceAll("\\n", "").replaceAll("-----BEGIN " + pattern + " KEY-----", "")
+						.replaceAll("-----END " + pattern + " KEY-----", "").trim());
+
+		try {
+			Constructor<?> constructor1 = keyClass.getDeclaredConstructor(decoded.getClass());
+			Object object = constructor1.newInstance(new Object[] { decoded });
+			if (object instanceof KeySpec) {
+				KeySpec keySpec = (KeySpec) object;
+				Method method = _keyFactory.getClass().getDeclaredMethod(generateMethodName, KeySpec.class);
+				object = method.invoke(_keyFactory, keySpec);
+				if (object instanceof Key) {
+					return (Key) object;
+				}
+			}
+		} catch (Exception e) {
+			logException(e);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Method Base64 encodes data Returns Base64 encoded name value pairs in Map
+	 * passed as parameter data
+	 * 
+	 * @param data name value pairs in Map to be encoded by function
+	 * @return base64 encoded string
+	 */
+	private static String base64EncodeAndFormatData(Map<Object, Object> data) {
+		StringBuilder buffer = new StringBuilder();
+		for (Map.Entry<Object, Object> entry : data.entrySet()) {
+			buffer.append(!buffer.isEmpty() ? "&" : "");
+			buffer.append(URLEncoder.encode(entry.getKey().toString(), StandardCharsets.UTF_8));
+			buffer.append("=");
+			buffer.append(URLEncoder.encode(entry.getValue().toString(), StandardCharsets.UTF_8));
+		}
+		return buffer.toString();
+	}
+
+	/**
+	 * Method loads servlet resource pointed to by parameter uri into parameter
+	 * buffer
+	 * 
+	 * @param uri    contains path to servlet resource to be loaded
+	 * @param buffer loaded resource will be placed in this parameter
+	 * @return boolean indicating whether the resource load suceeded or not
+	 */
+	private boolean loadURI(String uri, StringBuilder buffer) {
+		InputStream configStream = null;
+
+		try {
+			configStream = getServletContext().getResourceAsStream(uri);
+
+			if (configStream == null) {
+				Logger.getLogger(IpServer.class.getName()).log(Level.SEVERE,
+						"error: failed to get InputStream for '" + uri + "'");
+				return false;
+			}
+			String data = new String(configStream.readAllBytes());
+			configStream.close();
+
+			buffer.append(data);
+			return true;
+		} catch (Exception e1) {
+			logException(e1);
+
+			try {
+				if (configStream != null) {
+					configStream.close();
+				}
+			} catch (IOException e2) {
+				logException(e2);
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Returns a boolean indicating whether the parameter inet4Ip value is a valid
+	 * iPv4 address.
+	 *
+	 * @param inet4Ip the iPv4 address value to be checked.
+	 * @return boolean indicating whether parameter inet4Ip is valid or not
+	 */
+	public static boolean isValidInet4AddressFormat(String inet4Ip) {
+		if (inet4Ip == null || inet4Ip.isEmpty()) {
+			return false;
+		}
+		return _pattern.matcher(inet4Ip == null ? "" : inet4Ip).matches();
+	}
+
+	/**
+	 * Regular expression value used to validate iP4v ip addresses.
+	 */
+	private static final Pattern _pattern = Pattern
+			.compile("^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." + "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\."
+					+ "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." + "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
+
+	/**
+	 * A list of all validated client supplied Ip address are stored here along timestamp 
+	 */
+	final private HashMap<String, Long> _clientIps = new HashMap<String, Long>();
+
+	/**
+	 * KeyFactory used to generate private and public keys
+	 */
+	private KeyFactory _keyFactory = null;
+
+	/**
+	 * Boolean indicating whether this IpClient object is in a valid state.
+	 */
+	private boolean _isValid = false;
+
+	/**
+	 * Generated private key is stored here
+	 */
+	private PrivateKey _privateKey = null;
+
+	/**
+	 * Generated public key is stored here
+	 */
+	private PublicKey _publicKey = null;
+
+	/**
+	 * Private key Uri resource location
+	 */
+	private String _privateKeyUri = null;
+
+	/**
+	 * Public key Uri resource location
+	 */
+	private String _publicKeyUri = null;
+	
+	/**
+	 * Constant equal to number of milliseconds in a day
+	 * 1000 = milliseconds per second
+	 * 60 = seconds per minute
+	 * 60 = minutes per hour
+	 * 24 = hours per day
+	 */
+	final private static long CONST_MILLISECONDS_IN_ONEDAY = 1000 * 60 * 60 * 24;
+	
+	/**
+	 * Constant containing localhost ip address
+	 */
+	final private static String CONST_LOCALHOST_IP_STRING = "127.0.0.1";
+}

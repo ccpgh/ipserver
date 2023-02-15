@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename local variable &apos;builder&apos; in &apos;cc.tools.ip.server.IpServer.formatData(...)&apos; to &apos;buffer&apos;&#x0A;- Original project: &apos;IpServer&apos;&#x0A;- Original element: &apos;cc.tools.ip.server.IpServer.formatData(Map&lt;Object, Object&gt;).builder&apos;&#x0A;- Renamed element: &apos;builder&apos;&#x0A;- Update references to refactored element" description="Rename local variable &apos;builder&apos;" id="org.eclipse.jdt.ui.rename.local.variable" input="/src\/main\/java&lt;cc.tools.ip.server{IpServer.java[IpServer~formatData~QMap\&lt;QObject;QObject;&gt;;@builder!7441!7484!7455!7461!QStringBuilder;!0!false" name="buffer" references="true" stamp="1675769833163" version="1.0"/>
+</session>

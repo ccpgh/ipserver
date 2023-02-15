@@ -1,0 +1,324 @@
+package cc.tools.ip.server;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.logging.*;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+
+import javax.servlet.ServletConfig;
+import javax.servlet.ServletContext;
+import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import java.io.InputStream;
+import java.security.Key;
+import java.security.KeyFactory;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.spec.KeySpec;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.crypto.Cipher;
+
+@WebServlet(description = "Ip Tools", urlPatterns = { "/server/ip/get", "/server/ip/set", "/server/ip/query" })
+
+public final class IpServer extends HttpServlet {
+	private static final long serialVersionUID = 1L;
+       
+    public IpServer() {
+        super();
+    }
+    
+    public void destroy() {
+    	super.destroy();
+    }
+       
+    public void init(ServletConfig config) throws ServletException { 
+    	super.init(config);  
+    	       	
+    	try {
+    		ServletContext context = getServletContext();
+
+    		_keyFactory = KeyFactory.getInstance("RSA");
+        	
+    		_privateKeyUri = context.getInitParameter("server-private-key");
+        	if (_privateKeyUri == null) {
+            	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "could not load private key Uri from context");
+        		return;
+        	}
+        	
+        	_publicKeyUri = context.getInitParameter("client-public-key");
+        	if (_publicKeyUri == null) {
+            	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "could not load public key Uri from context");
+        		return;
+        	}
+        	
+        	Key publicKey = getKey(_publicKeyUri,
+					X509EncodedKeySpec.class,
+					"PUBLIC",
+					"generatePublic");
+        	
+        	if (publicKey instanceof PublicKey) {
+        		_publicKey = (PublicKey) publicKey;
+        	}
+
+        	if (_publicKey == null) {
+            	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "could not load public key");
+        		return;        		
+        	}
+        	
+        	Key privateKey = getKey(_privateKeyUri,
+        			PKCS8EncodedKeySpec.class,
+					"PRIVATE",
+					"generatePrivate");
+        	
+        	if (privateKey instanceof PrivateKey) {
+        		_privateKey = (PrivateKey) privateKey;
+        	}
+        	
+        	if (_privateKey == null) {
+            	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "could not load private key");
+        		return;        		
+        	}
+        	
+    	} catch (Exception e) {
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "exception: " + " - " + e.getClass().getName() + " - " + e.getMessage());
+        	e.printStackTrace();
+        	return;
+    	}
+    	
+    	_isValid = true;
+    }
+
+    public String encryptToClientBase64(String plainText) {
+        String encoded = null;
+        
+        try {
+        	Cipher cipher = Cipher.getInstance("RSA");
+        	cipher.init(Cipher.ENCRYPT_MODE, _publicKey);
+        	byte[] encrypted = cipher.doFinal(plainText.getBytes());
+        	encoded = Base64.getEncoder().encodeToString(encrypted);
+        } catch (Exception e) {
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "exception: " + " - " + e.getClass().getName() + " - " + e.getMessage());
+        	e.printStackTrace();
+        }
+        
+        return encoded;
+    }
+    
+    public String decryptFromServerBase64(String base64EncodedEncryptedBytes) {
+        String plainText = null;
+        
+        try {
+        	final Cipher cipher = Cipher.getInstance("RSA");
+        	cipher.init(Cipher.DECRYPT_MODE, _privateKey);
+        	byte[] decoded = Base64
+        			.getDecoder()
+        			.decode(base64EncodedEncryptedBytes);
+        	byte[] decrypted = cipher.doFinal(decoded);
+        	plainText = new String(decrypted);
+        } catch (Exception e) {
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "exception: " + " - " + e.getClass().getName() + " - " + e.getMessage());
+        	e.printStackTrace();
+        }
+        
+        return plainText;
+    }
+    
+    protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    	if (!_isValid) {
+    		response.setStatus(500);
+        	response.getWriter().append("servlet invalid");
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "servlet invalid");
+        	return;    		
+    	}
+    	super.service(request, response);
+    }
+    
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {   	
+    	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "doGet called");
+
+    	if ("/tomcat/server/ip/set".compareToIgnoreCase(request.getRequestURI()) != 0 &&
+    			"/tomcat/server/ip/get".compareToIgnoreCase(request.getRequestURI()) != 0 &&
+    			"/tomcat/server/ip/query".compareToIgnoreCase(request.getRequestURI()) != 0) {
+    		response.setStatus(200);
+        	response.setContentType("text/html");
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "ignoring context " + request.getRequestURI());
+        	return;    		
+    	}
+    	    	
+		response.setStatus(200);
+    	response.setContentType("text/html");
+    	response.getWriter().append(request.getRemoteAddr());
+    	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "doGet ok");
+    	return;
+    }
+    
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "doPost called");
+    	
+    	if ("/tomcat/server/ip/get".compareToIgnoreCase(request.getRequestURI()) == 0 ||
+    			"/tomcat/server/ip/set".compareToIgnoreCase(request.getRequestURI()) == 0) {
+    		doPostGetSet(request, response);
+    		return;
+    	}
+    	
+    	if ("/tomcat/server/ip/query".compareToIgnoreCase(request.getRequestURI()) == 0) {
+    		doPostQuery(request, response);
+    		return;
+    	}
+    	
+		response.setStatus(200);
+    	response.setContentType("text/html");
+    	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "ignoring context " + request.getRequestURI());
+    }
+
+    protected void doPostQuery(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "doPostQuery called");
+		response.setStatus(200);
+		response.getWriter().append(_ip);
+    	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "ok");
+    }
+    
+    protected void doPostGetSet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "doPostGetSet called");
+    	
+    	String random = request.getParameter("a");
+    	String now = request.getParameter("b");
+    	String ip = request.getParameter("c") == null ? "" : request.getParameter("c");
+    	boolean setMode = "/tomcat/server/ip/set".compareToIgnoreCase(request.getRequestURI()) == 0;
+    	
+    	if (random == null || random.isEmpty() || 
+    			now == null || now.isEmpty() || 
+    			((ip == null || ip.isEmpty()) && setMode)) {
+    		response.setStatus(400);
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "parameters missing in request");
+        	return;
+    	}
+    	
+    	String randomDecrypted = decryptFromServerBase64(random);
+    	String nowDecrypted = decryptFromServerBase64(now);
+    	String ipDecrypted = setMode ? decryptFromServerBase64(ip) : "";
+    			
+    	Map<Object, Object> data = new HashMap<Object, Object>();
+        data.put("a", encryptToClientBase64(randomDecrypted));
+        data.put("b", encryptToClientBase64(nowDecrypted));
+        if (!setMode) {
+            data.put("c", encryptToClientBase64(request.getRemoteAddr()));
+        } else {
+            data.put("c", encryptToClientBase64(ipDecrypted));        	
+        }
+    	String formattedData = formatData(data);
+    	if (formattedData != null && !formattedData.isEmpty()) {
+    		if (setMode) {
+    			if (request.getRemoteAddr().compareToIgnoreCase(ipDecrypted) != 0) {
+    	    		response.setStatus(400);
+    	        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "NOT ok - Ip Address mismatch");
+    	        	return;
+    			}
+
+    			_ip = ipDecrypted;
+    		}
+    		
+    		response.setStatus(200);
+    		response.getWriter().append(formattedData);
+        	Logger.getLogger (IpServer.class.getName()).log(Level.INFO, "ok");
+    	} else {
+    		response.setStatus(400);
+        	Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "NOT ok");
+    	}
+    }
+    
+    private static String formatData(Map<Object, Object> data) {
+    	StringBuilder buffer = new StringBuilder();
+        for (Map.Entry<Object, Object> entry : data.entrySet()) {
+            if (!buffer.isEmpty()) {
+                buffer.append("&");
+            }
+            buffer.append(URLEncoder.encode(entry.getKey().toString(), StandardCharsets.UTF_8));
+            buffer.append("=");
+            buffer.append(URLEncoder.encode(entry.getValue().toString(), StandardCharsets.UTF_8));
+        }
+        return buffer.toString();
+    }
+ 
+    protected Key getKey(String uri, Class<?> keySpecClass, String pattern, String generateFunction) {
+    	StringBuilder resource = new StringBuilder();
+    	
+    	if (!loadFile(uri, resource)) {
+    		System.err.println("error: unable to loadFile " + uri);
+    		return null;
+    	}
+
+	    byte[] decoded = Base64
+	    		.getDecoder()
+  		      	.decode(resource.toString()
+  			    		.replaceAll("\\n", "")
+  			    		.replaceAll("-----BEGIN " + pattern + " KEY-----", "")
+  			    		.replaceAll("-----END " + pattern + " KEY-----", "")
+  			    		.trim());
+		
+		try {
+			Constructor<?> constructor1 = keySpecClass.getDeclaredConstructor(decoded.getClass());
+			Object object = constructor1.newInstance(new Object[]{ decoded });
+			if (object instanceof KeySpec) {
+				KeySpec keySpec = (KeySpec) object;
+				Method method = _keyFactory.getClass().getDeclaredMethod(generateFunction, KeySpec.class);
+				object = method.invoke(_keyFactory, keySpec);
+				if (object instanceof Key) {
+					return (Key) object;
+ 				}
+			}
+		} catch (Exception e) {
+			System.err.println("error: exception " + e.getClass().getName() + " - " + e.getMessage()); 
+			e.printStackTrace();
+		}
+
+		return null;
+    }
+    
+    protected boolean loadFile(String uri, StringBuilder buffer) {    	
+    	InputStream configStream = getServletContext().getResourceAsStream(uri);
+    	
+    	if (configStream == null) {
+    		Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "error: failed to get InputStream for '" + uri + "'");
+    		return false;
+    	}
+    	
+    	try {
+    		buffer.append(new String(configStream.readAllBytes()));
+    		configStream.close();
+    		return true;
+    	} catch (Exception e1) {
+    		Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "exception: " + " - " + e1.getClass().getName() + " - " + e1.getMessage());
+        	e1.printStackTrace();
+
+    		try {
+        	    configStream.close();
+        	} catch (IOException e2) {
+        		Logger.getLogger (IpServer.class.getName()).log(Level.SEVERE, "exception: " + " - " + e2.getClass().getName() + " - " + e2.getMessage());
+			e2.printStackTrace();
+        	}
+    	}
+    	return false;
+    }
+    
+    //
+    private boolean _isValid = false;
+    private KeyFactory _keyFactory = null;
+    private PrivateKey _privateKey = null;
+    private PublicKey _publicKey = null;
+    private String _privateKeyUri = null;
+    private String _publicKeyUri = null;
+    private String _ip = "";
+}
+

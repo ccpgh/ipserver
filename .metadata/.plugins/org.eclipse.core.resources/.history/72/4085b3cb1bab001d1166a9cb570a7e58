@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://xmlns.jcp.org/xml/ns/javaee" xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd" id="WebApp_ID" version="4.0">
+  <display-name>IpServer</display-name>
+  <description>                                                                                                     
+    My own variation on a dynamic ip maintainer.                                                                    
+    As an exercise to practice asynchronous                                                                         
+    key usage and encryption.                                                                                       
+  </description>  
+  <welcome-file-list>
+    <welcome-file>index.html</welcome-file>
+    <welcome-file>index.jsp</welcome-file>
+    <welcome-file>index.htm</welcome-file>
+    <welcome-file>default.html</welcome-file>
+    <welcome-file>default.jsp</welcome-file>
+    <welcome-file>default.htm</welcome-file>
+  </welcome-file-list>
+  
+  <context-param>
+    <param-name>client-public-key</param-name>
+    <param-value>/WEB-INF/conf/client/client-public_key_rsa_4096_pkcs8-exported.pem</param-value>
+  </context-param>
+ 
+  <context-param>
+    <param-name>server-private-key</param-name>
+    <param-value>/WEB-INF/conf/server/server-private_key_rsa_4096_pkcs8-generated.pem</param-value>
+  </context-param>
+  
+  <!--   servlet>
+    <servlet-name>tomcat</servlet-name>
+    <servlet-class>cc.tools.ip.server.IpServer</servlet-class>
+    <load-on-startup>5</load-on-startup>
+  </servlet>
+
+  <servlet-mapping>
+    <servlet-name>tomcat</servlet-name>
+    <url-pattern>/tomcat/server/ip/*</url-pattern>
+  </servlet-mapping -->
+
+</web-app>

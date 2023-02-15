@@ -1,0 +1,57 @@
+package cc.tools.ip.client;
+
+import java.util.*;
+import java.util.regex.*;
+
+/**
+* This class contains common utility functions
+* 
+* @author      ccpgh
+* @version     %I%, %G%
+* @since       0.1
+*/
+
+public class IpCommon {
+
+	/**
+	* Returns a boolean indicating whether the parameter token is a valid token.
+	* Each text value read into the problem from an external source should be checked 
+	* by this function.
+	* Only a very limited set of characters are white-listed and allowed.
+	* Errors are written to the errors parameter for access by the caller.
+	*
+	* @param  token  the String token value to be checked.
+	* @param  errors any errors are written to this variable
+	* @return      boolean indicating whether parameter token is a valid input value or not
+	*/
+	public static boolean validToken(String token, List<String> errors) {
+		for (char c : token.toCharArray()) {
+			if (!(Character.isLetterOrDigit(c) || c == '/' ||	c == '\\' || c == '.' || c == '-' || c == '_')) {
+				errors.add("invalid character '" + c + "' found in token '" + token + "'");
+				return false;
+			}
+		}
+		return true;
+	}
+
+	//
+    private static final Pattern _pattern = Pattern.compile(
+    		"^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." +
+            "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." +
+            "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\." +
+            "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
+
+	/**
+	* Returns a boolean indicating whether the parameter inet4Ip value
+	* is a valid iPv4 address.
+	*
+	* @param  ip  the ip address value to be checked.
+	* @param  errors the location of the image, relative to the url argument
+	* @return      the image at the specified URL
+	* @see         Image
+	*/
+    public static boolean isValidInet4AddressFormat(String inet4Ip) {
+        return _pattern.matcher(inet4Ip == null ? "" : inet4Ip).matches();
+    }
+
+}

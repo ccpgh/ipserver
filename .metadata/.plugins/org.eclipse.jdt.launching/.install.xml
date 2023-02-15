@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<dirs>
+    <entry loc="/opt/eclipse/java/eclipse/plugins/org.eclipse.justj.openjdk.hotspot.jre.full.linux.x86_64_17.0.5.v20221102-0933" stamp="1669926499000"/>
+    <entry loc="/opt/eclipse/java/eclipse/plugins/org.eclipse.justj.openjdk.hotspot.jre.full.linux.x86_64_17.0.5.v20221102-0933/jre" stamp="1669926499000"/>
+    <entry loc="/Library/Java/JavaVirtualMachines/jdk1.8.0_131.jdk/Contents/Home" stamp="1489567979000"/>
+    <entry loc="/usr/lib/jvm/java-17-openjdk-amd64" stamp="1674353652865"/>
+    <entry loc="/lib/jvm/java-19-openjdk-amd64" stamp="1676293881826"/>
+    <entry loc="/Users/cc/.p2/pool/plugins/org.eclipse.justj.openjdk.hotspot.jre.full.macosx.x86_64_17.0.6.v20230204-1729/jre" stamp="1675859315999"/>
+    <entry loc="/Library/Java/JavaVirtualMachines/jdk1.7.0_79.jdk/Contents/Home" stamp="1428691750000"/>
+    <entry loc="/Users/cc/.p2/pool/plugins/org.eclipse.justj.openjdk.hotspot.jre.full.macosx.x86_64_17.0.6.v20230204-1729" stamp="1675859316001"/>
+    <entry loc="/usr/lib/jvm/java-1.19.0-openjdk-amd64" stamp="1676293881826"/>
+    <entry loc="/Library/Internet Plug-Ins/JavaAppletPlugin.plugin/Contents/Home" stamp="1650952478000"/>
+</dirs>

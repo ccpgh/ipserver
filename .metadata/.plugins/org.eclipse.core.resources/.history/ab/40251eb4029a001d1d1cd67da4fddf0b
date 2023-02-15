@@ -1,0 +1,41 @@
+package cc.tools.ip.client;
+
+import java.net.http.HttpClient;
+import org.apache.http.client.*;
+
+// TODO
+// 1. encrypt keys
+//
+
+public final class IpClient {
+
+	public static void main (String[] args) {
+		// TODO Auto-generated method stub
+		System.err.println("hello world");
+		
+		HttpClient client = new DefaultHttpClient();
+		HttpGet request = new HttpGet("http://www.vogella.com");
+		HttpResponse response = client.execute(request);
+		
+		/*
+		HttpPost httppost = new HttpPost("http://www.a-domain.example/foo/");
+
+		// Request parameters and other properties.
+		List<NameValuePair> params = new ArrayList<NameValuePair>(2);
+		params.add(new BasicNameValuePair("param-1", "12345"));
+		params.add(new BasicNameValuePair("param-2", "Hello!"));
+		httppost.setEntity(new UrlEncodedFormEntity(params, "UTF-8"));
+
+		//Execute and get the response.
+		HttpResponse response = httpclient.execute(httppost);
+		HttpEntity entity = response.getEntity();
+
+		if (entity != null) {
+		    try (InputStream instream = entity.getContent()) {
+		        // do something useful
+		    }
+		}
+		*/
+	}
+
+}
