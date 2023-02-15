@@ -1,6 +1,5 @@
 project: ipserver<p>
 java asynchronous encrypted servlet communication in tomcat demo<p>
-intentionally written for only one active client<p>
 
 environment:<p>
 
