@@ -261,7 +261,7 @@ public final class IpServer extends HttpServlet {
 		StringBuilder results = new StringBuilder();
 		for (String result : clientIps) {
 			if (!results.isEmpty()) {
-				results.append('.');
+				results.append(',');
 			}
 			results.append(result);
 		}
